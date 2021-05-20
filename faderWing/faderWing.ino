@@ -97,7 +97,8 @@ static const int MOTOR_PINS[] = {22,23, 3,2,  19,18,  17,16,  14,15};
 
 #define FADER_UPDATE_RATE_MS	40 // update each 40ms
 
-const int16_t THRESHOLD = 10; // Jitter threshold of the faders
+static const int FADER_ACCURACY = 3;
+static const int MOTOR_ACCURACY = 10;
 
 uint32_t updateTime; 
 
@@ -147,10 +148,11 @@ void sendPing() {
 void issueFilters() {
 	OSCMessage filter("/eos/filter/add");
 	filter.add("/eos/out/ping");
+  filter.add("/eos/fader/*");
 	SLIPSerial.beginPacket();
 	filter.send(SLIPSerial);
 	SLIPSerial.endPacket();
-	}
+}
 
 /**
  * @brief initialize a fader bank
@@ -204,15 +206,17 @@ void parseOSCMessage(String& msg) {
 	if (msg.indexOf(HANDSHAKE_QUERY) != -1) {
 		// handshake string found!
 		connectedToEos = true;
+    digitalWrite(EOS_LED,HIGH);
 		initEOS();
 		}
 
 	if (msg.indexOf(PING_QUERY) != -1) {
 		// handshake string found!
 		connectedToEos = true;
-		}
+    digitalWrite(EOS_LED,HIGH);
 	}
 
+}
 /**
  * @brief initialise the fader
  *
@@ -230,13 +234,39 @@ void initFader(struct Fader* fader, uint8_t bank, uint8_t number, uint8_t analog
   fader->motorUpPin = motorUpPin;
   fader->motorDownPin = motorDownPin;
 	fader->analogLast = 0xFFFF; // forces an osc output of the fader
-	fader->btnLast = LOW;
 	pinMode(fader->btnPin, INPUT_PULLUP);
+  fader->btnLast = digitalRead(fader->btnPin);
 	fader->analogPattern = EOS_FADER + '/' + String(fader->bank) + '/' + String(fader->number);
 	fader->btnPattern = EOS_FADER + '/' + String(fader->bank) + '/' + String(fader->number) + "/fire"; //or /stop
 	fader->updateTime = millis();
 	}
-
+ /*
+  * Send a motor to a given spot
+  */
+void motorGoTo(struct Fader* fader, int pos) {
+  if (pos < 0) {
+    pos = 0;
+  } else if (pos > 1023) {
+    pos = 1023;
+  }
+  
+  if (analogRead(fader->analogPin) > (pos+MOTOR_ACCURACY)) {
+    digitalWrite(fader->motorUpPin,LOW);
+    digitalWrite(fader->motorDownPin,HIGH);
+    while (analogRead(fader->analogPin) > (pos+MOTOR_ACCURACY)) {
+    }
+  } else if (analogRead(fader->analogPin) < (pos-MOTOR_ACCURACY)) {
+    digitalWrite(fader->motorUpPin,HIGH);
+    digitalWrite(fader->motorDownPin,LOW);
+    while (analogRead(fader->analogPin) < (pos-MOTOR_ACCURACY)) {
+    }
+  } 
+  digitalWrite(fader->motorUpPin,LOW);
+  digitalWrite(fader->motorDownPin,LOW);
+  delay(5);
+  digitalWrite(fader->motorUpPin,LOW);
+  digitalWrite(fader->motorDownPin,LOW);
+}
 /**
  * @brief update the fader
  *
@@ -245,39 +275,38 @@ void initFader(struct Fader* fader, uint8_t bank, uint8_t number, uint8_t analog
 void updateFader(struct Fader* fader) {
 	if((fader->updateTime + FADER_UPDATE_RATE_MS) < millis()) {
 		int16_t raw = analogRead(fader->analogPin) >> 2; // reduce to 8 bit
-		int16_t current = THRESHOLD;
-		int16_t delta = raw - current;
-		if (delta <= -THRESHOLD) current = raw + THRESHOLD;
-		if (delta >= THRESHOLD) current = raw - THRESHOLD;
-		if (current != fader->analogLast) {
-			float value = ((current - THRESHOLD) * 1.0 / (255 - 2 * THRESHOLD)) / 1.0; // normalize to values between 0.0 and 1.0
-			fader->analogLast = current;
+		if ((raw-FADER_ACCURACY >= fader->analogLast) || (raw+FADER_ACCURACY <= fader->analogLast)) {
+			float value = ((raw) * 1.0 / 256) / 1.0; // normalize to values between 0.0 and 1.0
+			fader->analogLast = raw;
 
+      if (value > 0.97) value = 1.0; //Normalise top values
+      else if (value < 0.04) value = 0.0; //Normalise low values
+      
 			OSCMessage faderUpdate(fader->analogPattern.c_str());
 			faderUpdate.add(value);
 			SLIPSerial.beginPacket();
 			faderUpdate.send(SLIPSerial);
 			SLIPSerial.endPacket();
-			}
+		}
 
 		if((digitalRead(fader->btnPin)) != fader->btnLast) {
 			OSCMessage btnUpdate(fader->btnPattern.c_str());
 			if(fader->btnLast == LOW) {
 				fader->btnLast = HIGH;
-				btnUpdate.add(EDGE_UP);
-				}
+				btnUpdate.add(EDGE_DOWN);
+			}
 			else {
 				fader->btnLast = LOW;
-				btnUpdate.add(EDGE_DOWN);
-				}
+				btnUpdate.add(EDGE_UP);
+			}
 			SLIPSerial.beginPacket();
 			btnUpdate.send(SLIPSerial);
 			SLIPSerial.endPacket();
-			}
+		}
 
 		fader->updateTime = millis();
-		}
 	}
+}
 /**
  * @brief setup arduino
  *
@@ -294,7 +323,7 @@ void setup() {
 
   //Setup LEDs
   pinMode(POWER_LED, OUTPUT); 
-  digitalWrite(POWER_LED,LOW);
+  digitalWrite(POWER_LED,HIGH);
   pinMode(USB_LED, OUTPUT); 
   digitalWrite(USB_LED,HIGH); 
   pinMode(EOS_LED, OUTPUT); 
@@ -362,6 +391,7 @@ void loop() {
 		//We first check if it's been too long and we need to time out
 		if(diff > TIMEOUT_AFTER_IDLE_INTERVAL) {
 			connectedToEos = false;
+      digitalWrite(EOS_LED,LOW);
 			lastMessageRxTime = 0;
 			timeoutPingSent = false;
 			}
