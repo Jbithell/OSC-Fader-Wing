@@ -121,6 +121,8 @@ struct Fader {
 	uint8_t btnPin;
   uint8_t motorUpPin;
   uint8_t motorDownPin;
+  bool moving;
+  int16_t movingTarget;
   int16_t faderMin;
   int16_t faderMax;
 	int16_t analogLast;
@@ -218,6 +220,11 @@ void sendFader(struct Fader* fader, float pos) {
 void parseFaderUpdate1(OSCMessage& msg, int addressOffset) {
   if (!FIVE_OFFSET) {
     sendFader(&fader1,msg.getOSCData(0)->getFloat());
+    lcd.setCursor(0, 0);
+    lcd.print("          ");
+  } else {
+    lcd.setCursor(0, 0);
+    lcd.print("IGNORE1");
   }
 }
 void parseFaderUpdate2(OSCMessage& msg, int addressOffset) {
@@ -309,6 +316,8 @@ void initFader(struct Fader* fader, uint8_t number, uint8_t analogPin, uint8_t b
 	fader->btnPin = btnPin;
   fader->motorUpPin = motorUpPin;
   fader->motorDownPin = motorDownPin;
+  fader->moving = false;
+  fader->movingTarget = 0;
   fader->faderMin = 0;
   fader->faderMax = 1024;
   //Calibrate Fader
@@ -346,6 +355,8 @@ void initButton(struct Button* button, uint8_t btnPin) {
  * Change the layer the buttons are on
  */
 void changeLayer(uint8_t newPage, bool fiveOffset, struct Fader* fader1,struct Fader* fader2,struct Fader* fader3,struct Fader* fader4,struct Fader* fader5) {
+    FADER_PAGE = newPage;
+    FIVE_OFFSET = fiveOffset;
     fader1->number = (fiveOffset ? 6 : 1);
     fader1->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader1->number);
     fader1->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader1->number) + "/fire";
@@ -362,8 +373,6 @@ void changeLayer(uint8_t newPage, bool fiveOffset, struct Fader* fader1,struct F
     fader5->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader5->number);
     fader5->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader5->number) + "/fire";
     initFaders(newPage);
-    FADER_PAGE = newPage;
-    FIVE_OFFSET = fiveOffset;
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("EOS Fader Page");
@@ -380,30 +389,35 @@ void changeLayer(uint8_t newPage, bool fiveOffset, struct Fader* fader1,struct F
   * Send a motor to a given spot
   */
 void motorGoTo(struct Fader* fader, int pos) {
+  //Instruct the motor to go somewhere
   if (pos < fader->faderMin) {
     pos = fader->faderMin;
   } else if (pos > fader->faderMax) {
     pos = fader->faderMax;
   }
-  
-  if (analogRead(fader->analogPin) > (pos+MOTOR_ACCURACY)) {
-    digitalWrite(fader->motorUpPin,LOW);
-    digitalWrite(fader->motorDownPin,HIGH);
-    while (analogRead(fader->analogPin) > (pos+MOTOR_ACCURACY)) {
-    }
-  } else if (analogRead(fader->analogPin) < (pos-MOTOR_ACCURACY)) {
-    digitalWrite(fader->motorUpPin,HIGH);
-    digitalWrite(fader->motorDownPin,LOW);
-    while (analogRead(fader->analogPin) < (pos-MOTOR_ACCURACY)) {
+  fader->movingTarget = pos; 
+  fader->moving = true;
+}
+void moveMotor(struct Fader* fader) {
+  //Actually move the motor in the loop
+  if (fader->moving) {
+    if (analogRead(fader->analogPin) < (fader->movingTarget+MOTOR_ACCURACY) && analogRead(fader->analogPin) > (fader->movingTarget-MOTOR_ACCURACY)) {
+      //Stop moving
+      digitalWrite(fader->motorUpPin,LOW);
+      digitalWrite(fader->motorDownPin,LOW);
+      delay(5);
+      digitalWrite(fader->motorUpPin,LOW);
+      digitalWrite(fader->motorDownPin,LOW);
+      fader->moving = false;
+    } else if (analogRead(fader->analogPin) > (fader->movingTarget+MOTOR_ACCURACY)) {
+      digitalWrite(fader->motorUpPin,LOW);
+      digitalWrite(fader->motorDownPin,HIGH);
+    } else if (analogRead(fader->analogPin) < (fader->movingTarget-MOTOR_ACCURACY)) {
+      digitalWrite(fader->motorUpPin,HIGH);
+      digitalWrite(fader->motorDownPin,LOW);
     }
   }
-  digitalWrite(fader->motorUpPin,LOW);
-  digitalWrite(fader->motorDownPin,LOW);
-  delay(5);
-  digitalWrite(fader->motorUpPin,LOW);
-  digitalWrite(fader->motorDownPin,LOW);
 }
-
 void updateFader(struct Fader* fader) {
 	if((fader->updateTime + FADER_UPDATE_RATE_MS) < millis()) {
 		int16_t raw = analogRead(fader->analogPin) >> 2; // reduce to 8 bit
@@ -507,6 +521,11 @@ void setup() {
   //Connect to EOS
 	initEOS();
 
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("  Calibrating   ");
+  lcd.setCursor(0, 1);
+  lcd.print("!!HANDS  CLEAR!!");
 	// init of hardware elements
 	initFader(&fader1, 1, FADER_1_LEVELER, FADER_1_BUTTON, FADER_1_MOTORUP, FADER_1_MOTORDOWN);
 	initFader(&fader2, 2, FADER_2_LEVELER, FADER_2_BUTTON, FADER_2_MOTORUP, FADER_2_MOTORDOWN);
@@ -516,6 +535,9 @@ void setup() {
   initButton(&upBtn, MENU_UP_BUTTON);
   initButton(&entBtn, MENU_ENT_BUTTON);
   initButton(&downBtn, MENU_DOWN_BUTTON);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("     Ready      ");
 }
 
 
@@ -581,4 +603,9 @@ void loop() {
   updateButton(&upBtn,1);
   updateButton(&entBtn,2);
   updateButton(&downBtn,3);
+  moveMotor(&fader1);
+  moveMotor(&fader2);
+  moveMotor(&fader3);
+  moveMotor(&fader4);
+  moveMotor(&fader5);
 }
