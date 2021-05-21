@@ -76,9 +76,9 @@ static const int MOTOR_PINS[] = {22,23, 3,2,  19,18,  17,16,  14,15};
 #define FADER_5_MOTORUP 14
 #define FADER_5_MOTORDOWN 15
 
-#define MENU_UP_BUTTON  27
-#define MENU_ENT_LEVELER  24
-#define MENU_DOWN_BUTTON  25
+#define MENU_UP_BUTTON  25
+#define MENU_ENT_BUTTON  24
+#define MENU_DOWN_BUTTON  27
 
 
 // constants and macros
@@ -91,11 +91,13 @@ static const int MOTOR_PINS[] = {22,23, 3,2,  19,18,  17,16,  14,15};
 #define PING_AFTER_IDLE_INTERVAL		2500
 #define TIMEOUT_AFTER_IDLE_INTERVAL	5000
 
-#define FADER_BANK				1
-#define FADER_PAGE				1 // fader page on EOS / Nomad
+int FADER_PAGE = 1; //Page to start on
+bool FIVE_OFFSET = false; 
+#define FADER_BANK				1 //Only comes in when you have lots of fader wings
 #define NUMBER_OF_FADERS	10 // size of the faders per page on EOS / NOmad
 
 #define FADER_UPDATE_RATE_MS	40 // update each 40ms
+#define BUTTON_DEBOUNCE_RATE_MS 50
 
 static const int FADER_ACCURACY = 3;
 static const int MOTOR_ACCURACY = 10;
@@ -115,7 +117,7 @@ bool timeoutPingSent = false;
 // datatypes
 struct Fader {
 	uint8_t number;
-	uint8_t bank;
+	uint8_t page;
 	uint8_t analogPin;
 	uint8_t btnPin;
   uint8_t motorUpPin;
@@ -126,6 +128,11 @@ struct Fader {
 	String btnPattern;
 	uint32_t updateTime;
 	} fader1, fader2, fader3, fader4, fader5;
+struct Button {
+  uint8_t btnPin;
+  int16_t btnLast;
+  uint32_t updateTime;
+  } upBtn, entBtn, downBtn;
 
 /**
  * @brief send a ping with a message to the console
@@ -152,6 +159,7 @@ void issueFilters() {
 	SLIPSerial.beginPacket();
 	filter.send(SLIPSerial);
 	SLIPSerial.endPacket();
+
 }
 
 /**
@@ -161,18 +169,18 @@ void issueFilters() {
  * @param page number of the fader page
  * @param faders number of faders in this bank
  */
-void initFaders(uint8_t bank, uint8_t page, uint8_t faders) {
+void initFaders(uint8_t page) {
 	String faderInit = "/eos/fader/";
-	faderInit += bank;
+	faderInit += FADER_BANK;
 	faderInit += "/config/";
 	faderInit += page;
 	faderInit += '/';
-	faderInit += faders;
+	faderInit += NUMBER_OF_FADERS;
 	OSCMessage faderBank(faderInit.c_str());
 	SLIPSerial.beginPacket();
 	faderBank.send(SLIPSerial);
 	SLIPSerial.endPacket();
-	}
+}
 
 /**
  * @brief
@@ -190,8 +198,8 @@ void initEOS() {
 	issueFilters();
 
 	// activate a fader bank
-	initFaders(FADER_BANK, FADER_PAGE, NUMBER_OF_FADERS);
-	}
+  changeLayer(FADER_PAGE,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+}
 
 /**
  * @brief
@@ -201,6 +209,12 @@ void initEOS() {
  *
  * @param msg OSC message
  */
+void parseFaderUpdate(OSCMessage& msg, int addressOffset) {
+  char buf[8];
+  msg.getAddress(buf, addressOffset + 1, 8);
+  //pos = msg.getOSCData(0)->getFloat();
+}
+
 void parseOSCMessage(String& msg) {
 	// check to see if this is the handshake string
 	if (msg.indexOf(HANDSHAKE_QUERY) != -1) {
@@ -216,6 +230,10 @@ void parseOSCMessage(String& msg) {
     digitalWrite(EOS_LED,HIGH);
 	}
 
+  // prepare the message for routing by filling an OSCMessage object with our message string
+  OSCMessage oscmsg;
+  oscmsg.fill((uint8_t*)msg.c_str(), (int)msg.length());
+  oscmsg.route("/eos/fader/", parseFaderUpdate);
 }
 /**
  * @brief initialise the fader
@@ -226,8 +244,8 @@ void parseOSCMessage(String& msg) {
  * @param analogPin
  * @param btnPin
  */
-void initFader(struct Fader* fader, uint8_t bank, uint8_t number, uint8_t analogPin, uint8_t btnPin, uint8_t motorUpPin, uint8_t motorDownPin) {
-	fader->bank = bank;
+void initFader(struct Fader* fader, uint8_t page, uint8_t number, uint8_t analogPin, uint8_t btnPin, uint8_t motorUpPin, uint8_t motorDownPin) {
+	fader->page = page;
 	fader->number = number;
 	fader->analogPin = analogPin;
 	fader->btnPin = btnPin;
@@ -236,10 +254,55 @@ void initFader(struct Fader* fader, uint8_t bank, uint8_t number, uint8_t analog
 	fader->analogLast = 0xFFFF; // forces an osc output of the fader
 	pinMode(fader->btnPin, INPUT_PULLUP);
   fader->btnLast = digitalRead(fader->btnPin);
-	fader->analogPattern = EOS_FADER + '/' + String(fader->bank) + '/' + String(fader->number);
-	fader->btnPattern = EOS_FADER + '/' + String(fader->bank) + '/' + String(fader->number) + "/fire"; //or /stop
+	fader->analogPattern = EOS_FADER + '/' + String(fader->page) + '/' + String(fader->number);
+	fader->btnPattern = EOS_FADER + '/' + String(fader->page) + '/' + String(fader->number) + "/fire"; //or /stop
 	fader->updateTime = millis();
-	}
+}
+void initButton(struct Button* button, uint8_t btnPin) {
+  button->btnPin = btnPin;
+  pinMode(button->btnPin, INPUT_PULLUP);
+  button->btnLast = digitalRead(button->btnPin);
+  button->updateTime = millis();
+}
+
+/*
+ * Change the layer the buttons are on
+ */
+void changeLayer(uint8_t newPage, bool fiveOffset, struct Fader* fader1,struct Fader* fader2,struct Fader* fader3,struct Fader* fader4,struct Fader* fader5) {
+    fader1->page = newPage;
+    fader2->page = newPage;
+    fader3->page = newPage;
+    fader4->page = newPage;
+    fader5->page = newPage;
+    fader1->number = (fiveOffset ? 6 : 1);
+    fader1->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader1->number);
+    fader1->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader1->number) + "/fire";
+    fader2->number = (fiveOffset ? 7 : 2);
+    fader2->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader2->number);
+    fader2->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader2->number) + "/fire";
+    fader3->number = (fiveOffset ? 8 : 3);
+    fader3->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader3->number);
+    fader3->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader3->number) + "/fire";
+    fader4->number = (fiveOffset ? 9 : 4);
+    fader4->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader4->number);
+    fader4->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader4->number) + "/fire";
+    fader5->number = (fiveOffset ? 10 : 5);
+    fader5->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader5->number);
+    fader5->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader5->number) + "/fire";
+    initFaders(newPage);
+    FADER_PAGE = newPage;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("EOS Faders - ");
+    lcd.print(FADER_PAGE);
+    lcd.setCursor(0, 1);
+    if (fiveOffset) {
+      lcd.print("6  7   8   9  10");
+    } else {
+      lcd.print("1  2   3   4   5");
+    }
+}
+
  /*
   * Send a motor to a given spot
   */
@@ -267,11 +330,7 @@ void motorGoTo(struct Fader* fader, int pos) {
   digitalWrite(fader->motorUpPin,LOW);
   digitalWrite(fader->motorDownPin,LOW);
 }
-/**
- * @brief update the fader
- *
- * @param fader
- */
+
 void updateFader(struct Fader* fader) {
 	if((fader->updateTime + FADER_UPDATE_RATE_MS) < millis()) {
 		int16_t raw = analogRead(fader->analogPin) >> 2; // reduce to 8 bit
@@ -307,6 +366,41 @@ void updateFader(struct Fader* fader) {
 		fader->updateTime = millis();
 	}
 }
+
+void updateButton(struct Button* btn, int btnType) {
+  if((btn->updateTime + BUTTON_DEBOUNCE_RATE_MS) < millis()) {
+    if((digitalRead(btn->btnPin)) != btn->btnLast) {
+      if(btn->btnLast == LOW) {
+        btn->btnLast = HIGH;
+        if (btnType == 1) { //Up
+          if (FADER_PAGE > 1) {
+            FIVE_OFFSET = false;
+            changeLayer(FADER_PAGE-1,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+          }
+        } else if (btnType == 2) {
+          if (FIVE_OFFSET) {
+            FIVE_OFFSET = false;
+          } else {
+            FIVE_OFFSET = true;
+          }
+          changeLayer(FADER_PAGE,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+        } else { //Down
+          if (FADER_PAGE < 100) {
+            FIVE_OFFSET = false;
+            changeLayer(FADER_PAGE+1,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+          }
+        }        
+      }
+      else {
+        btn->btnLast = LOW;
+      }
+    }
+    btn->updateTime = millis();
+  }
+}
+
+
+
 /**
  * @brief setup arduino
  *
@@ -333,6 +427,9 @@ void setup() {
   lcd.begin();
   //lcd.noBacklight();
   lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Starting Up.....");
 
   //Setup Motors
   for (int i=0; i<sizeof MOTOR_PINS/sizeof MOTOR_PINS[0]; i++) {
@@ -345,11 +442,14 @@ void setup() {
 	initEOS();
 
 	// init of hardware elements
-	initFader(&fader1, FADER_BANK, 1, FADER_1_LEVELER, FADER_1_BUTTON, FADER_1_MOTORUP, FADER_1_MOTORDOWN);
-	initFader(&fader2, FADER_BANK, 2, FADER_2_LEVELER, FADER_2_BUTTON, FADER_2_MOTORUP, FADER_2_MOTORDOWN);
-	initFader(&fader3, FADER_BANK, 3, FADER_3_LEVELER, FADER_3_BUTTON, FADER_3_MOTORUP, FADER_3_MOTORDOWN);
-	initFader(&fader4, FADER_BANK, 4, FADER_4_LEVELER, FADER_4_BUTTON, FADER_4_MOTORUP, FADER_4_MOTORDOWN);
-	initFader(&fader5, FADER_BANK, 5, FADER_5_LEVELER, FADER_5_BUTTON, FADER_5_MOTORUP, FADER_5_MOTORDOWN);
+	initFader(&fader1, FADER_PAGE, 1, FADER_1_LEVELER, FADER_1_BUTTON, FADER_1_MOTORUP, FADER_1_MOTORDOWN);
+	initFader(&fader2, FADER_PAGE, 2, FADER_2_LEVELER, FADER_2_BUTTON, FADER_2_MOTORUP, FADER_2_MOTORDOWN);
+	initFader(&fader3, FADER_PAGE, 3, FADER_3_LEVELER, FADER_3_BUTTON, FADER_3_MOTORUP, FADER_3_MOTORDOWN);
+	initFader(&fader4, FADER_PAGE, 4, FADER_4_LEVELER, FADER_4_BUTTON, FADER_4_MOTORUP, FADER_4_MOTORDOWN);
+	initFader(&fader5, FADER_PAGE, 5, FADER_5_LEVELER, FADER_5_BUTTON, FADER_5_MOTORUP, FADER_5_MOTORDOWN);
+  initButton(&upBtn, MENU_UP_BUTTON);
+  initButton(&entBtn, MENU_ENT_BUTTON);
+  initButton(&downBtn, MENU_DOWN_BUTTON);
 }
 
 
@@ -392,6 +492,9 @@ void loop() {
 		if(diff > TIMEOUT_AFTER_IDLE_INTERVAL) {
 			connectedToEos = false;
       digitalWrite(EOS_LED,LOW);
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("No EOS Connected");
 			lastMessageRxTime = 0;
 			timeoutPingSent = false;
 			}
@@ -409,4 +512,7 @@ void loop() {
 	updateFader(&fader3);
 	updateFader(&fader4);
 	updateFader(&fader5);
-	}
+  updateButton(&upBtn,1);
+  updateButton(&entBtn,2);
+  updateButton(&downBtn,3);
+}
