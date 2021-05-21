@@ -99,8 +99,8 @@ bool FIVE_OFFSET = false;
 #define FADER_UPDATE_RATE_MS	40 // update each 40ms
 #define BUTTON_DEBOUNCE_RATE_MS 50
 
-static const int FADER_ACCURACY = 3;
-static const int MOTOR_ACCURACY = 10;
+#define FADER_ACCURACY 3 //%
+#define MOTOR_ACCURACY 10 //Out of 1024
 
 uint32_t updateTime; 
 
@@ -121,6 +121,8 @@ struct Fader {
 	uint8_t btnPin;
   uint8_t motorUpPin;
   uint8_t motorDownPin;
+  int16_t faderMin;
+  int16_t faderMax;
 	int16_t analogLast;
 	int16_t btnLast;
 	String analogPattern;
@@ -197,7 +199,9 @@ void initEOS() {
 	issueFilters();
 
 	// activate a fader bank
-  changeLayer(FADER_PAGE,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+  if (connectedToEos) {
+    changeLayer(FADER_PAGE,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+  }
 }
 
 /**
@@ -208,12 +212,59 @@ void initEOS() {
  *
  * @param msg OSC message
  */
-void parseFaderUpdate(OSCMessage& msg, int addressOffset) {
-  char buf[8];
-  msg.getAddress(buf, addressOffset + 1, 8);
-  //pos = msg.getOSCData(0)->getFloat();
+void sendFader(struct Fader* fader, float pos) {
+   motorGoTo(fader,int(pos*1024));
 }
-
+void parseFaderUpdate1(OSCMessage& msg, int addressOffset) {
+  if (!FIVE_OFFSET) {
+    sendFader(&fader1,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdate2(OSCMessage& msg, int addressOffset) {
+  if (!FIVE_OFFSET) {
+    sendFader(&fader2,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdate3(OSCMessage& msg, int addressOffset) {
+  if (!FIVE_OFFSET) {
+    sendFader(&fader3,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdate4(OSCMessage& msg, int addressOffset) {
+  if (!FIVE_OFFSET) {
+    sendFader(&fader4,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdate5(OSCMessage& msg, int addressOffset) {
+  if (!FIVE_OFFSET) {
+    sendFader(&fader5,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdateO1(OSCMessage& msg, int addressOffset) {
+  if (FIVE_OFFSET) {
+    sendFader(&fader1,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdateO2(OSCMessage& msg, int addressOffset) {
+  if (FIVE_OFFSET) {
+    sendFader(&fader2,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdateO3(OSCMessage& msg, int addressOffset) {
+  if (FIVE_OFFSET) {
+    sendFader(&fader3,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdateO4(OSCMessage& msg, int addressOffset) {
+  if (FIVE_OFFSET) {
+    sendFader(&fader4,msg.getOSCData(0)->getFloat());
+  }
+}
+void parseFaderUpdateO5(OSCMessage& msg, int addressOffset) {
+  if (FIVE_OFFSET) {
+    sendFader(&fader5,msg.getOSCData(0)->getFloat());
+  }
+}
 void parseOSCMessage(String& msg) {
 	// check to see if this is the handshake string
 	if (msg.indexOf(HANDSHAKE_QUERY) != -1) {
@@ -232,7 +283,16 @@ void parseOSCMessage(String& msg) {
   // prepare the message for routing by filling an OSCMessage object with our message string
   OSCMessage oscmsg;
   oscmsg.fill((uint8_t*)msg.c_str(), (int)msg.length());
-  oscmsg.route("/eos/fader/", parseFaderUpdate);
+  oscmsg.route("/eos/fader/1/1", parseFaderUpdate1); //Needs changing to String("/eos/fader/" + String(FADER_BANK) + "/1")
+  oscmsg.route("/eos/fader/1/2", parseFaderUpdate2);
+  oscmsg.route("/eos/fader/1/3", parseFaderUpdate3);
+  oscmsg.route("/eos/fader/1/4", parseFaderUpdate4);
+  oscmsg.route("/eos/fader/1/5", parseFaderUpdate5);
+  oscmsg.route("/eos/fader/1/6", parseFaderUpdateO1);
+  oscmsg.route("/eos/fader/1/7", parseFaderUpdateO2);
+  oscmsg.route("/eos/fader/1/8", parseFaderUpdateO3);
+  oscmsg.route("/eos/fader/1/9", parseFaderUpdateO4);
+  oscmsg.route("/eos/fader/1/10", parseFaderUpdateO5);
 }
 /**
  * @brief initialise the fader
@@ -249,6 +309,25 @@ void initFader(struct Fader* fader, uint8_t number, uint8_t analogPin, uint8_t b
 	fader->btnPin = btnPin;
   fader->motorUpPin = motorUpPin;
   fader->motorDownPin = motorDownPin;
+  fader->faderMin = 0;
+  fader->faderMax = 1024;
+  //Calibrate Fader
+  digitalWrite(motorUpPin,HIGH);
+  digitalWrite(motorDownPin,LOW); 
+  delay(500);
+  digitalWrite(motorUpPin, HIGH);
+  digitalWrite(motorDownPin,HIGH);
+  fader->faderMax = analogRead(analogPin);   
+  digitalWrite(motorUpPin, LOW);
+  digitalWrite(motorDownPin,HIGH);
+  delay(500);
+  digitalWrite(motorUpPin, HIGH);
+  digitalWrite(motorDownPin,HIGH);
+  fader->faderMin = analogRead(analogPin);
+  digitalWrite(motorUpPin, LOW);
+  digitalWrite(motorDownPin,LOW);
+
+ 
 	fader->analogLast = 0xFFFF; // forces an osc output of the fader
 	pinMode(fader->btnPin, INPUT_PULLUP);
   fader->btnLast = digitalRead(fader->btnPin);
@@ -284,9 +363,10 @@ void changeLayer(uint8_t newPage, bool fiveOffset, struct Fader* fader1,struct F
     fader5->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader5->number) + "/fire";
     initFaders(newPage);
     FADER_PAGE = newPage;
+    FIVE_OFFSET = fiveOffset;
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("EOS Faders - ");
+    lcd.print("EOS Fader Page");
     lcd.print(FADER_PAGE);
     lcd.setCursor(0, 1);
     if (fiveOffset) {
@@ -300,10 +380,10 @@ void changeLayer(uint8_t newPage, bool fiveOffset, struct Fader* fader1,struct F
   * Send a motor to a given spot
   */
 void motorGoTo(struct Fader* fader, int pos) {
-  if (pos < 0) {
-    pos = 0;
-  } else if (pos > 1023) {
-    pos = 1023;
+  if (pos < fader->faderMin) {
+    pos = fader->faderMin;
+  } else if (pos > fader->faderMax) {
+    pos = fader->faderMax;
   }
   
   if (analogRead(fader->analogPin) > (pos+MOTOR_ACCURACY)) {
@@ -316,7 +396,7 @@ void motorGoTo(struct Fader* fader, int pos) {
     digitalWrite(fader->motorDownPin,LOW);
     while (analogRead(fader->analogPin) < (pos-MOTOR_ACCURACY)) {
     }
-  } 
+  }
   digitalWrite(fader->motorUpPin,LOW);
   digitalWrite(fader->motorDownPin,LOW);
   delay(5);
@@ -366,21 +446,14 @@ void updateButton(struct Button* btn, int btnType) {
       if(btn->btnLast == LOW) {
         btn->btnLast = HIGH;
         if (btnType == 1) { //Up
-          if (FADER_PAGE > 1) {
-            FIVE_OFFSET = false;
-            changeLayer(FADER_PAGE-1,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+          if (FADER_PAGE > 1 || (FADER_PAGE == 1 && FIVE_OFFSET)) {
+            changeLayer((FIVE_OFFSET ? FADER_PAGE : FADER_PAGE-1),!FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
           }
         } else if (btnType == 2) {
-          if (FIVE_OFFSET) {
-            FIVE_OFFSET = false;
-          } else {
-            FIVE_OFFSET = true;
-          }
-          changeLayer(FADER_PAGE,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+          changeLayer(1,false,&fader1,&fader2,&fader3,&fader4,&fader5);
         } else { //Down
-          if (FADER_PAGE < 100) {
-            FIVE_OFFSET = false;
-            changeLayer(FADER_PAGE+1,FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
+          if (FADER_PAGE < 99 || (FADER_PAGE == 99 && !FIVE_OFFSET)) {
+            changeLayer((FIVE_OFFSET ? FADER_PAGE+1 : FADER_PAGE),!FIVE_OFFSET,&fader1,&fader2,&fader3,&fader4,&fader5);
           }
         }        
       }
