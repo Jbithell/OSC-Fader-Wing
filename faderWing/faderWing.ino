@@ -117,7 +117,6 @@ bool timeoutPingSent = false;
 // datatypes
 struct Fader {
 	uint8_t number;
-	uint8_t page;
 	uint8_t analogPin;
 	uint8_t btnPin;
   uint8_t motorUpPin;
@@ -244,8 +243,7 @@ void parseOSCMessage(String& msg) {
  * @param analogPin
  * @param btnPin
  */
-void initFader(struct Fader* fader, uint8_t page, uint8_t number, uint8_t analogPin, uint8_t btnPin, uint8_t motorUpPin, uint8_t motorDownPin) {
-	fader->page = page;
+void initFader(struct Fader* fader, uint8_t number, uint8_t analogPin, uint8_t btnPin, uint8_t motorUpPin, uint8_t motorDownPin) {
 	fader->number = number;
 	fader->analogPin = analogPin;
 	fader->btnPin = btnPin;
@@ -254,8 +252,8 @@ void initFader(struct Fader* fader, uint8_t page, uint8_t number, uint8_t analog
 	fader->analogLast = 0xFFFF; // forces an osc output of the fader
 	pinMode(fader->btnPin, INPUT_PULLUP);
   fader->btnLast = digitalRead(fader->btnPin);
-	fader->analogPattern = EOS_FADER + '/' + String(fader->page) + '/' + String(fader->number);
-	fader->btnPattern = EOS_FADER + '/' + String(fader->page) + '/' + String(fader->number) + "/fire"; //or /stop
+	fader->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader->number);
+	fader->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader->number) + "/fire"; //or /stop
 	fader->updateTime = millis();
 }
 void initButton(struct Button* button, uint8_t btnPin) {
@@ -269,26 +267,21 @@ void initButton(struct Button* button, uint8_t btnPin) {
  * Change the layer the buttons are on
  */
 void changeLayer(uint8_t newPage, bool fiveOffset, struct Fader* fader1,struct Fader* fader2,struct Fader* fader3,struct Fader* fader4,struct Fader* fader5) {
-    fader1->page = newPage;
-    fader2->page = newPage;
-    fader3->page = newPage;
-    fader4->page = newPage;
-    fader5->page = newPage;
     fader1->number = (fiveOffset ? 6 : 1);
-    fader1->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader1->number);
-    fader1->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader1->number) + "/fire";
+    fader1->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader1->number);
+    fader1->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader1->number) + "/fire";
     fader2->number = (fiveOffset ? 7 : 2);
-    fader2->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader2->number);
-    fader2->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader2->number) + "/fire";
+    fader2->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader2->number);
+    fader2->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader2->number) + "/fire";
     fader3->number = (fiveOffset ? 8 : 3);
-    fader3->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader3->number);
-    fader3->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader3->number) + "/fire";
+    fader3->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader3->number);
+    fader3->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader3->number) + "/fire";
     fader4->number = (fiveOffset ? 9 : 4);
-    fader4->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader4->number);
-    fader4->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader4->number) + "/fire";
+    fader4->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader4->number);
+    fader4->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader4->number) + "/fire";
     fader5->number = (fiveOffset ? 10 : 5);
-    fader5->analogPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader5->number);
-    fader5->btnPattern = EOS_FADER + '/' + String(newPage) + '/' + String(fader5->number) + "/fire";
+    fader5->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader5->number);
+    fader5->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader5->number) + "/fire";
     initFaders(newPage);
     FADER_PAGE = newPage;
     lcd.clear();
@@ -442,11 +435,11 @@ void setup() {
 	initEOS();
 
 	// init of hardware elements
-	initFader(&fader1, FADER_PAGE, 1, FADER_1_LEVELER, FADER_1_BUTTON, FADER_1_MOTORUP, FADER_1_MOTORDOWN);
-	initFader(&fader2, FADER_PAGE, 2, FADER_2_LEVELER, FADER_2_BUTTON, FADER_2_MOTORUP, FADER_2_MOTORDOWN);
-	initFader(&fader3, FADER_PAGE, 3, FADER_3_LEVELER, FADER_3_BUTTON, FADER_3_MOTORUP, FADER_3_MOTORDOWN);
-	initFader(&fader4, FADER_PAGE, 4, FADER_4_LEVELER, FADER_4_BUTTON, FADER_4_MOTORUP, FADER_4_MOTORDOWN);
-	initFader(&fader5, FADER_PAGE, 5, FADER_5_LEVELER, FADER_5_BUTTON, FADER_5_MOTORUP, FADER_5_MOTORDOWN);
+	initFader(&fader1, 1, FADER_1_LEVELER, FADER_1_BUTTON, FADER_1_MOTORUP, FADER_1_MOTORDOWN);
+	initFader(&fader2, 2, FADER_2_LEVELER, FADER_2_BUTTON, FADER_2_MOTORUP, FADER_2_MOTORDOWN);
+	initFader(&fader3, 3, FADER_3_LEVELER, FADER_3_BUTTON, FADER_3_MOTORUP, FADER_3_MOTORDOWN);
+	initFader(&fader4, 4, FADER_4_LEVELER, FADER_4_BUTTON, FADER_4_MOTORUP, FADER_4_MOTORDOWN);
+	initFader(&fader5, 5, FADER_5_LEVELER, FADER_5_BUTTON, FADER_5_MOTORUP, FADER_5_MOTORDOWN);
   initButton(&upBtn, MENU_UP_BUTTON);
   initButton(&entBtn, MENU_ENT_BUTTON);
   initButton(&downBtn, MENU_DOWN_BUTTON);
