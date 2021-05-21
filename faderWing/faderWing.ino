@@ -123,6 +123,8 @@ struct Fader {
   uint8_t motorDownPin;
   bool moving;
   int16_t movingTarget;
+  int16_t fiveOffsetEOSPos;
+  int16_t EOSPos;
   int16_t faderMin;
   int16_t faderMax;
 	int16_t analogLast;
@@ -214,63 +216,46 @@ void initEOS() {
  *
  * @param msg OSC message
  */
-void sendFader(struct Fader* fader, float pos) {
-   motorGoTo(fader,int(pos*1024));
+void sendFader(struct Fader* fader, float pos,bool fiveOffset) {
+  if (fiveOffset == FIVE_OFFSET) {
+    motorGoTo(fader,int(pos*1024));
+  }
+  if (fiveOffset) {
+    fader->fiveOffsetEOSPos = int(pos*1024);
+  } else {
+    fader->EOSPos = int(pos*1024);
+  }
 }
 void parseFaderUpdate1(OSCMessage& msg, int addressOffset) {
-  if (!FIVE_OFFSET) {
-    sendFader(&fader1,msg.getOSCData(0)->getFloat());
-    lcd.setCursor(0, 0);
-    lcd.print("          ");
-  } else {
-    lcd.setCursor(0, 0);
-    lcd.print("IGNORE1");
-  }
+  sendFader(&fader1,msg.getOSCData(0)->getFloat(),false);
 }
 void parseFaderUpdate2(OSCMessage& msg, int addressOffset) {
-  if (!FIVE_OFFSET) {
-    sendFader(&fader2,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader2,msg.getOSCData(0)->getFloat(),false);
 }
 void parseFaderUpdate3(OSCMessage& msg, int addressOffset) {
-  if (!FIVE_OFFSET) {
-    sendFader(&fader3,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader3,msg.getOSCData(0)->getFloat(),false);
 }
 void parseFaderUpdate4(OSCMessage& msg, int addressOffset) {
-  if (!FIVE_OFFSET) {
-    sendFader(&fader4,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader4,msg.getOSCData(0)->getFloat(),false);
 }
 void parseFaderUpdate5(OSCMessage& msg, int addressOffset) {
-  if (!FIVE_OFFSET) {
-    sendFader(&fader5,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader5,msg.getOSCData(0)->getFloat(),false);
 }
 void parseFaderUpdateO1(OSCMessage& msg, int addressOffset) {
-  if (FIVE_OFFSET) {
-    sendFader(&fader1,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader1,msg.getOSCData(0)->getFloat(),true);
 }
 void parseFaderUpdateO2(OSCMessage& msg, int addressOffset) {
-  if (FIVE_OFFSET) {
-    sendFader(&fader2,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader2,msg.getOSCData(0)->getFloat(),true);
 }
 void parseFaderUpdateO3(OSCMessage& msg, int addressOffset) {
-  if (FIVE_OFFSET) {
-    sendFader(&fader3,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader3,msg.getOSCData(0)->getFloat(),true);
 }
 void parseFaderUpdateO4(OSCMessage& msg, int addressOffset) {
-  if (FIVE_OFFSET) {
-    sendFader(&fader4,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader4,msg.getOSCData(0)->getFloat(),true);
 }
 void parseFaderUpdateO5(OSCMessage& msg, int addressOffset) {
-  if (FIVE_OFFSET) {
-    sendFader(&fader5,msg.getOSCData(0)->getFloat());
-  }
+  sendFader(&fader5,msg.getOSCData(0)->getFloat(),true);
+
 }
 void parseOSCMessage(String& msg) {
 	// check to see if this is the handshake string
@@ -318,6 +303,8 @@ void initFader(struct Fader* fader, uint8_t number, uint8_t analogPin, uint8_t b
   fader->motorDownPin = motorDownPin;
   fader->moving = false;
   fader->movingTarget = 0;
+  fader->fiveOffsetEOSPos = 0;
+  fader->EOSPos = 0;
   fader->faderMin = 0;
   fader->faderMax = 1024;
   //Calibrate Fader
@@ -360,18 +347,23 @@ void changeLayer(uint8_t newPage, bool fiveOffset, struct Fader* fader1,struct F
     fader1->number = (fiveOffset ? 6 : 1);
     fader1->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader1->number);
     fader1->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader1->number) + "/fire";
+    motorGoTo(fader1,(fiveOffset ? fader1->fiveOffsetEOSPos : fader1->EOSPos));
     fader2->number = (fiveOffset ? 7 : 2);
     fader2->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader2->number);
     fader2->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader2->number) + "/fire";
+    motorGoTo(fader2,(fiveOffset ? fader2->fiveOffsetEOSPos : fader2->EOSPos));
     fader3->number = (fiveOffset ? 8 : 3);
     fader3->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader3->number);
     fader3->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader3->number) + "/fire";
+    motorGoTo(fader3,(fiveOffset ? fader3->fiveOffsetEOSPos : fader3->EOSPos));
     fader4->number = (fiveOffset ? 9 : 4);
     fader4->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader4->number);
     fader4->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader4->number) + "/fire";
+    motorGoTo(fader4,(fiveOffset ? fader4->fiveOffsetEOSPos : fader4->EOSPos));
     fader5->number = (fiveOffset ? 10 : 5);
     fader5->analogPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader5->number);
     fader5->btnPattern = EOS_FADER + '/' + String(FADER_BANK) + '/' + String(fader5->number) + "/fire";
+    motorGoTo(fader5,(fiveOffset ? fader5->fiveOffsetEOSPos : fader5->EOSPos));
     initFaders(newPage);
     lcd.clear();
     lcd.setCursor(0, 0);
